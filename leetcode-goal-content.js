@@ -531,138 +531,196 @@ function pushAcceptedIfNew(list, seen, item) {
   list.push(item);
 }
 
-async function fetchNewAcceptedWithSubmissionsApi(sinceTs) {
-  const accepted = [];
-  const seen = new Set();
+function createSubmissionsApiAdapter() {
+  return {
+    source: "submissions_api",
+    maxPages: MAX_PAGES,
+    initialCursor() {
+      return { offset: 0 };
+    },
+    async list({ sinceTs, cursor }) {
+      const offset = Number(cursor?.offset || 0);
+      const data = await fetchSubmissionPage(offset);
+      const submissions = Array.isArray(data?.submissions_dump) ? data.submissions_dump : [];
+      if (!submissions.length) {
+        return { events: [], done: true, nextCursor: null };
+      }
 
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const offset = page * PAGE_SIZE;
-    const data = await fetchSubmissionPage(offset);
-    const submissions = Array.isArray(data?.submissions_dump) ? data.submissions_dump : [];
+      const events = [];
+      let reachedOld = false;
+      for (const submission of submissions) {
+        const unixSeconds = Number(submission?.timestamp);
+        if (!Number.isFinite(unixSeconds)) {
+          continue;
+        }
+        if (unixSeconds <= sinceTs) {
+          reachedOld = true;
+          break;
+        }
+        if (submission?.status_display !== "Accepted") {
+          continue;
+        }
+        const slug = submission?.title_slug || submission?.title;
+        if (!slug) {
+          continue;
+        }
+        events.push({ slug, timestamp: unixSeconds });
+      }
 
-    if (!submissions.length) {
-      break;
+      const done = reachedOld || data?.has_next === false || submissions.length < PAGE_SIZE;
+      const nextCursor = done ? null : { offset: offset + PAGE_SIZE };
+      return { events, done, nextCursor };
     }
-
-    let reachedOld = false;
-
-    for (const submission of submissions) {
-      const unixSeconds = Number(submission?.timestamp);
-      if (!Number.isFinite(unixSeconds)) {
-        continue;
-      }
-
-      if (unixSeconds <= sinceTs) {
-        reachedOld = true;
-        break;
-      }
-
-      if (submission?.status_display !== "Accepted") {
-        continue;
-      }
-
-      const slug = submission?.title_slug || submission?.title;
-      if (!slug) {
-        continue;
-      }
-
-      pushAcceptedIfNew(accepted, seen, { slug, timestamp: unixSeconds });
-    }
-
-    if (reachedOld) {
-      break;
-    }
-  }
-
-  return accepted;
+  };
 }
 
-async function fetchNewAcceptedWithGraphQL(username, sinceTs) {
-  try {
-    const accepted = [];
-    const seen = new Set();
-    let offset = 0;
-    let lastKey = null;
-    let previousLastKey = null;
-    let selectedSource = "";
-
-    for (let page = 0; page < MAX_GRAPHQL_PAGES; page += 1) {
-      const result = await fetchGraphQLSubmissionPage(username, offset, lastKey);
+function createGraphQLSubmissionListAdapter(username) {
+  const seenLastKeys = new Set();
+  return {
+    source: "graphql_submission_list",
+    maxPages: MAX_GRAPHQL_PAGES,
+    initialCursor() {
+      return { offset: 0, lastKey: null };
+    },
+    async list({ sinceTs, cursor }) {
+      const offset = Number(cursor?.offset || 0);
+      const currentLastKey = cursor?.lastKey || null;
+      const result = await fetchGraphQLSubmissionPage(username, offset, currentLastKey);
       const pageData = result?.pageData || null;
-      if (!selectedSource) {
-        selectedSource = result?.source || "graphql_submission_list";
-      }
+      const source = result?.source || "graphql_submission_list";
       const submissions = Array.isArray(pageData?.submissions) ? pageData.submissions : [];
-
       if (!submissions.length) {
-        break;
+        return { source, events: [], done: true, nextCursor: null };
       }
 
+      const events = [];
       let reachedOld = false;
-
       for (const raw of submissions) {
         const submission = normalizeGraphQLSubmission(raw);
         const unixSeconds = Number(submission.timestamp);
         if (!Number.isFinite(unixSeconds)) {
           continue;
         }
-
         if (unixSeconds <= sinceTs) {
           reachedOld = true;
           break;
         }
-
         if (submission.statusDisplay !== "Accepted") {
           continue;
         }
-
         const slug = submission.titleSlug || submission.title;
         if (!slug) {
           continue;
         }
-
-        pushAcceptedIfNew(accepted, seen, { slug, timestamp: unixSeconds });
+        events.push({ slug, timestamp: unixSeconds });
       }
 
       if (reachedOld) {
-        break;
+        return { source, events, done: true, nextCursor: null };
       }
 
       const hasNext = Boolean(pageData?.hasNext);
       const nextLastKey = pageData?.lastKey || null;
       if (!hasNext && !nextLastKey) {
-        break;
-      }
-      if (nextLastKey && nextLastKey === previousLastKey) {
-        break;
+        return { source, events, done: true, nextCursor: null };
       }
 
-      previousLastKey = lastKey;
-      lastKey = nextLastKey;
-      offset += GRAPHQL_PAGE_SIZE;
+      // Cursor-first pagination: prefer lastKey, use offset only when cursor is unavailable.
+      if (nextLastKey) {
+        if (nextLastKey === currentLastKey || seenLastKeys.has(nextLastKey)) {
+          return { source, events, done: true, nextCursor: null };
+        }
+        seenLastKeys.add(nextLastKey);
+        return { source, events, done: false, nextCursor: { offset, lastKey: nextLastKey } };
+      }
+
+      return { source, events, done: false, nextCursor: { offset: offset + GRAPHQL_PAGE_SIZE, lastKey: null } };
+    }
+  };
+}
+
+async function fetchAcceptedWithAdapter(adapter, sinceTs) {
+  const accepted = [];
+  const seen = new Set();
+  let cursor = adapter.initialCursor();
+  let resolvedSource = adapter.source || "unknown";
+
+  for (let page = 0; page < adapter.maxPages; page += 1) {
+    const pageResult = await adapter.list({ sinceTs, cursor, page });
+    if (pageResult?.source && (page === 0 || resolvedSource === adapter.source)) {
+      resolvedSource = pageResult.source;
     }
 
-    return { accepted, source: selectedSource || "graphql_submission_list" };
+    const events = Array.isArray(pageResult?.events) ? pageResult.events : [];
+    for (const event of events) {
+      if (!event?.slug) {
+        continue;
+      }
+      const unixSeconds = Number(event.timestamp);
+      if (!Number.isFinite(unixSeconds)) {
+        continue;
+      }
+      pushAcceptedIfNew(accepted, seen, { slug: event.slug, timestamp: unixSeconds });
+    }
+
+    if (pageResult?.done || !pageResult?.nextCursor) {
+      return { accepted, source: resolvedSource, pageLimitReached: false };
+    }
+
+    cursor = pageResult.nextCursor;
+  }
+
+  return { accepted, source: resolvedSource, pageLimitReached: true };
+}
+
+async function fetchNewAcceptedWithSubmissionsApi(sinceTs) {
+  const adapter = createSubmissionsApiAdapter();
+  return fetchAcceptedWithAdapter(adapter, sinceTs);
+}
+
+async function fetchNewAcceptedWithGraphQL(username, sinceTs) {
+  try {
+    const adapter = createGraphQLSubmissionListAdapter(username);
+    return fetchAcceptedWithAdapter(adapter, sinceTs);
   } catch (error) {
     const accepted = await fetchRecentAcceptedWithGraphQL(username, sinceTs);
     return {
       accepted,
       source: "graphql_recent_ac_submission_list",
-      fallbackReason: error?.message || String(error)
+      fallbackReason: error?.message || String(error),
+      pageLimitReached: true
     };
   }
 }
 
 async function fetchNewAcceptedSince(sinceTs, username) {
   try {
-    const accepted = await fetchNewAcceptedWithSubmissionsApi(sinceTs);
-    return { accepted, source: "submissions_api" };
+    const result = await fetchNewAcceptedWithSubmissionsApi(sinceTs);
+    return {
+      accepted: Array.isArray(result?.accepted) ? result.accepted : [],
+      source: "submissions_api",
+      pageLimitReached: Boolean(result?.pageLimitReached)
+    };
   } catch (error) {
     if (error?.status === 403 || String(error?.message || "").includes("HTTP 403")) {
       return fetchNewAcceptedWithGraphQL(username, sinceTs);
     }
     throw error;
   }
+}
+
+function buildFetchWarning(source, pageLimitReached, baselinePerformed) {
+  if (source === "graphql_recent_ac_submission_list") {
+    return baselinePerformed
+      ? "This month may be incomplete because LeetCode fallback only returned recent accepted submissions."
+      : "Stats may be incomplete because LeetCode fallback only returned recent accepted submissions.";
+  }
+  if (!pageLimitReached) {
+    return "";
+  }
+  return baselinePerformed
+    ? "This month may be incomplete due to API pagination limits."
+    : "Stats may be incomplete due to API pagination limits.";
 }
 
 function applyAcceptedToPeriods(cache, acceptedSubmissions, now, weekStart, monthStart, slugToDifficulty) {
@@ -753,6 +811,7 @@ async function buildStatsIncremental(username) {
   let baselinePerformed = false;
   let baselineSource = "";
   let baselineFallbackReason = "";
+  let pageLimitReached = false;
 
   if (needsMonthBaseline) {
     baselinePerformed = true;
@@ -761,6 +820,7 @@ async function buildStatsIncremental(username) {
     acceptedSubmissions = Array.isArray(baselineResult?.accepted) ? baselineResult.accepted : [];
     fetchSource = baselineResult?.source || "unknown";
     fallbackReason = baselineResult?.fallbackReason || "";
+    pageLimitReached = Boolean(baselineResult?.pageLimitReached);
     baselineSource = fetchSource;
     baselineFallbackReason = fallbackReason;
 
@@ -774,6 +834,7 @@ async function buildStatsIncremental(username) {
     acceptedSubmissions = Array.isArray(fetchResult?.accepted) ? fetchResult.accepted : [];
     fetchSource = fetchResult?.source || "unknown";
     fallbackReason = fetchResult?.fallbackReason || "";
+    pageLimitReached = Boolean(fetchResult?.pageLimitReached);
   }
 
   let slugToDifficulty = new Map();
@@ -803,6 +864,8 @@ async function buildStatsIncremental(username) {
     }
   }
 
+  const warning = buildFetchWarning(fetchSource, pageLimitReached, baselinePerformed);
+
   return {
     today: buildRangeStats(cache.today),
     week: {
@@ -813,6 +876,7 @@ async function buildStatsIncremental(username) {
       ...buildRangeStats(cache.month),
       monthStartISO: monthStart.toISOString()
     },
+    warning,
     debug: {
       source: fetchSource,
       acceptedFetchedCount: acceptedSubmissions.length,
@@ -821,6 +885,7 @@ async function buildStatsIncremental(username) {
       lastCheckedBefore,
       lastCheckedAfter: Number(cache.lastCheckedTs || 0),
       periodKeys: cache.periodKeys,
+      pageLimitReached,
       fallbackReason,
       baselinePerformed,
       baselineSource,

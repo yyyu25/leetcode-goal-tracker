@@ -49,6 +49,12 @@ h1 {
   line-height: 1.25;
 }
 
+.alert-banner.alert-warning {
+  border: 1px solid #7c620f;
+  background: #3f320f;
+  color: #fde68a;
+}
+
 .hidden {
   display: none;
 }

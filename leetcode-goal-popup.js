@@ -47,12 +47,14 @@ function setLoading(isLoading) {
   }
 }
 
-function showAlert(message) {
+function showAlert(message, type = "error") {
   if (!message) {
     alertBannerEl.textContent = "";
     alertBannerEl.classList.add("hidden");
+    alertBannerEl.classList.remove("alert-warning");
     return;
   }
+  alertBannerEl.classList.toggle("alert-warning", type === "warning");
   alertBannerEl.textContent = message;
   alertBannerEl.classList.remove("hidden");
 }
@@ -273,14 +275,18 @@ function renderResult(payload) {
     monthDifficultyEl.textContent = "Easy: - | Medium: - | Hard: -";
     const baseError = payload?.error || "Failed to fetch data.";
     statusEl.textContent = baseError;
-    showAlert(baseError);
+    showAlert(baseError, "error");
     showErrorDetails(payload?.details || "");
     renderProgressCards();
     return;
   }
 
   currentStats = payload;
-  showAlert("");
+  if (payload?.warning) {
+    showAlert(payload.warning, "warning");
+  } else {
+    showAlert("");
+  }
   showErrorDetails("");
 
   todayCountEl.textContent = String(payload.today.count);
