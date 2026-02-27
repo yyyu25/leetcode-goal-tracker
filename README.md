@@ -50,6 +50,28 @@ Fallback chain:
 Difficulty source:
 - `GET https://leetcode.com/api/problems/all/`
 
+## Data Engine Architecture
+
+The fetch layer is implemented with a **source adapter pattern** so stats logic is not tied to one response schema.
+
+- Adapter responsibility: convert each source payload into normalized events:
+  - `{ slug, timestamp }`
+- Engine responsibility: apply dedup + period counting (today/week/month) on normalized events.
+- Current adapters:
+  - Submissions API adapter
+  - GraphQL `submissionList` adapter
+  - GraphQL `recentAcSubmissionList` fallback
+
+This makes future schema migration easier when LeetCode changes API fields or pagination behavior.
+
+## Pagination Strategy and Completeness
+
+- Submissions API: offset pagination (`offset + limit`)
+- GraphQL `submissionList`: **cursor-first** pagination (`lastKey` first, offset fallback only)
+- Both paths use early stop with `sinceTs` for incremental fetch.
+
+If the extension hits pagination limits or falls back to `recentAcSubmissionList`, the popup shows a **yellow warning** that stats may be incomplete.
+
 ## Performance and Storage Design
 
 - Incremental cache per username in `chrome.storage.local`
@@ -58,6 +80,7 @@ Difficulty source:
 - Short username cache to reduce repeated login queries
 - Difficulty cache is compacted and size-limited for lower memory usage
 - Skip `storage.set` when no cache changes
+- Cursor loop protection for GraphQL pagination
 
 ## Goal Input Limits
 
@@ -90,6 +113,7 @@ Difficulty source:
 3. Set Daily / Weekly / Monthly goals and click `Save Goals`.
 4. The popup auto-refreshes stats each time you open it.
 5. Click `Refresh Stats` if you want an immediate manual refresh.
+6. If a yellow warning appears, the current period data may be partially fetched due to upstream API/pagination limits.
 
 ## Troubleshooting
 
@@ -109,6 +133,7 @@ Difficulty source:
 
 - Focuses on current active periods (today/week/month) and monthly baseline behavior.
 - Uses LeetCode endpoints that may change in the future.
+- During extreme submission volume, partial fetch is possible; the popup warning indicates this case.
 
 ## License
 
