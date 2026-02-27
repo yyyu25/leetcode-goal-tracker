@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeetCode Goal Tracker</title>
+    <link rel="stylesheet" href="leetcode-goal-popup.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>LeetCode Goal Tracker</h1>
+      <p class="hint">Counts are based on unique accepted problems.</p>
+      <p id="alert-banner" class="alert-banner hidden"></p>
+      <details id="error-details" class="error-details hidden">
+        <summary>查看技术详情</summary>
+        <pre id="error-details-text"></pre>
+      </details>
+      <p id="status" class="muted">Checking...</p>
+
+      <section class="goal-block">
+        <h2>Goals</h2>
+        <form id="goal-form" class="goal-form" novalidate>
+          <label>
+            Daily
+            <input id="daily-goal" type="number" min="0" max="50" step="1" placeholder="e.g. 2" />
+          </label>
+          <label>
+            Weekly
+            <input id="weekly-goal" type="number" min="0" max="300" step="1" placeholder="e.g. 10" />
+          </label>
+          <label>
+            Monthly
+            <input id="monthly-goal" type="number" min="0" max="1000" step="1" placeholder="e.g. 40" />
+          </label>
+          <button id="save-goals" type="submit">Save Goals</button>
+        </form>
+        <p id="goal-error" class="goal-error hidden"></p>
+      </section>
+
+      <section class="stat-block">
+        <div class="title-row">
+          <h2>Today</h2>
+          <span id="today-goal-badge" class="goal-badge badge-neutral">No Goal</span>
+        </div>
+        <p id="today-count" class="count">-</p>
+        <p id="today-difficulty" class="difficulty">Easy: - | Medium: - | Hard: -</p>
+        <div class="progress-row">
+          <div class="progress-track"><div id="today-progress-bar" class="progress-fill"></div></div>
+          <p id="today-progress-text" class="progress-text">Goal not set</p>
+        </div>
+      </section>
+
+      <section class="stat-block">
+        <div class="title-row">
+          <h2>This Week</h2>
+          <span id="week-goal-badge" class="goal-badge badge-neutral">No Goal</span>
+        </div>
+        <p id="week-count" class="count">-</p>
+        <p id="week-difficulty" class="difficulty">Easy: - | Medium: - | Hard: -</p>
+        <div class="progress-row">
+          <div class="progress-track"><div id="week-progress-bar" class="progress-fill"></div></div>
+          <p id="week-progress-text" class="progress-text">Goal not set</p>
+        </div>
+      </section>
+
+      <section class="stat-block">
+        <div class="title-row">
+          <h2>This Month</h2>
+          <span id="month-goal-badge" class="goal-badge badge-neutral">No Goal</span>
+        </div>
+        <p id="month-count" class="count">-</p>
+        <p id="month-difficulty" class="difficulty">Easy: - | Medium: - | Hard: -</p>
+        <div class="progress-row">
+          <div class="progress-track"><div id="month-progress-bar" class="progress-fill"></div></div>
+          <p id="month-progress-text" class="progress-text">Goal not set</p>
+        </div>
+      </section>
+
+      <button id="refresh" type="button">Refresh Stats</button>
+    </main>
+    <script src="leetcode-goal-popup.js"></script>
+  </body>
+</html>
