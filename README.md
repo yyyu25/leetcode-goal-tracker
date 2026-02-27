@@ -109,3 +109,7 @@ Difficulty source:
 
 - Focuses on current active periods (today/week/month) and monthly baseline behavior.
 - Uses LeetCode endpoints that may change in the future.
+
+## License
+
+MIT. See `LICENSE`.
